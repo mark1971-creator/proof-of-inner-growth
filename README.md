@@ -6,7 +6,14 @@ without revealing what they wrote, how much they practiced, or which enrolled st
 This project is built on the Midnight Network.
 
 By [Being at Full Potential](https://beingatfullpotential.io), a platform for inner development inspired by
-the Inner Development Goals. Demo video: *(link to follow)*.
+the Inner Development Goals.
+
+[![Proof of Inner Growth: demo video (2 min)](docs/video-thumbnail.jpg)](https://youtu.be/9BSL5_c2Ld4)
+
+**[Watch the 2-minute demo](https://youtu.be/9BSL5_c2Ld4)**: a professor sets a practice goal, a student proves it was met
+with a zero-knowledge proof on Midnight's Preview test network, and the professor sees the result. The screens are a
+prototype in Being at Full Potential's app; the contract, the proof and the Preview transaction shown come from the code
+in this repository.
 
 ## Why
 
