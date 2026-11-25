@@ -1,0 +1,8 @@
+Proof of Inner Growth
+Copyright 2026 Being at Full Potential
+
+This product includes software from midnight-examples
+(https://github.com/midnightntwrk/midnight-examples), Copyright (C) Midnight Foundation,
+licensed under the Apache License, Version 2.0: the project template, the test harness
+(src/test/sim.ts, src/test/coins.ts, src/wallet.ts, src/providers.ts, src/config.ts,
+src/deployments.ts, scripts/), and contract/schnorr.compact (from the zk-loan example).

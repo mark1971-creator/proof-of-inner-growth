@@ -1,0 +1,9 @@
+node_modules/
+contract/managed/
+.env.preview
+.env.preprod
+.env.custom
+.wallet-state/
+midnight-level-db/
+logs/
+dist/

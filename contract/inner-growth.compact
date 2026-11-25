@@ -1,0 +1,140 @@
+// Proof of Inner Growth (Being at Full Potential): a student proves they met a
+// course's practice goal for inner development, without revealing how much they
+// practiced, what they wrote, or which enrolled student they are.
+//
+// How it fits together:
+//   - The course organizer (admin) deploys one contract per course, with the
+//     course id and the practice goal: how many of the course's periods (for
+//     example two-week blocks) need at least one practice entry.
+//   - The organizer registers the platform's attestation key (the "issuer") and
+//     enrols each student by a hashed key the student's device derived from a
+//     secret only the student holds.
+//   - The platform (BFP) signs the student's COUNTS only, never content:
+//     [periods covered, total entries, hash of the student key, hash of the course id].
+//   - The student proves, inside the ZK circuit, that (1) they are on the class
+//     list, (2) the counts carry a valid issuer signature bound to them and this
+//     course, and (3) periods covered >= the goal. Only a receipt goes on chain.
+//   - The student gives the receipt to the professor (with their name, off chain);
+//     the professor looks it up in `goalMet`. One receipt per student per course.
+//
+// Patterns: the class list and the one-time receipt follow the voting example
+// (Merkle allow-list + nullifier); the signed counts follow zk-loan (Schnorr on
+// Jubjub verified in-circuit, schnorr.compact copied from that example).
+
+pragma language_version 0.28;
+import CompactStandardLibrary;
+import "schnorr" prefix Schnorr_;
+
+export { Schnorr_SchnorrSignature };
+
+// Course setup, fixed at deploy time.
+export sealed ledger adminPk: Bytes<32>;
+export sealed ledger courseId: Bytes<32>;
+export sealed ledger periodsRequired: Uint<8>;
+
+// The platform's attestation public key, under id 0. A Map (as in zk-loan) so
+// "no issuer yet" is representable.
+export ledger issuers: Map<Uint<8>, JubjubPoint>;
+
+// The class list: hashed student keys. The tree lets a student prove membership
+// without saying which leaf is theirs; the set stops double enrolment.
+export ledger students: MerkleTree<10, Bytes<32>>;
+export ledger studentKeys: Set<Bytes<32>>;
+export ledger enrolled: Counter;
+
+// Receipts of students who proved the goal. A receipt is a hash of the
+// student's secret, the course and this contract instance: unlinkable to the
+// enrolled key, and the same every time, so a second proof is refused.
+export ledger goalMet: Set<Bytes<32>>;
+export ledger proofs: Counter;
+
+witness secretKey(): Bytes<32>;
+witness studentPath(key: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+// [periods covered, total entries, the issuer's signature over the counts]
+witness practiceRecord(): [Uint<8>, Uint<16>, Schnorr_SchnorrSignature];
+
+constructor(cid: Bytes<32>, required: Uint<8>) {
+  adminPk = disclose(adminKey(secretKey()));
+  courseId = disclose(cid);
+  const r = disclose(required);
+  assert(r > 0, "The practice goal must be at least one period");
+  periodsRequired = r;
+}
+
+// Domain-separated keys from one secret per participant (the organizer's
+// secret for the admin key, a student's secret for the student key and receipt).
+export pure circuit adminKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "bfp-pog:admin"), sk]);
+}
+export pure circuit studentKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "bfp-pog:student"), sk]);
+}
+export pure circuit goalReceipt(sk: Bytes<32>, cid: Bytes<32>, instance: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([pad(32, "bfp-pog:receipt"), sk, cid, instance]);
+}
+// The field elements the issuer signs, so the off-chain signer and the
+// circuit build the same message.
+export pure circuit studentKeyHash(key: Bytes<32>): Field {
+  return transientHash<Bytes<32>>(key);
+}
+export pure circuit courseHash(cid: Bytes<32>): Field {
+  return transientHash<Bytes<32>>(cid);
+}
+
+circuit requireAdmin(): [] {
+  assert(disclose(adminKey(secretKey())) == adminPk, "Only the course organizer can do this");
+}
+
+export circuit setIssuer(pk: JubjubPoint): [] {
+  requireAdmin();
+  issuers.insert(0, disclose(pk));
+}
+
+export circuit enrol(key: Bytes<32>): [] {
+  requireAdmin();
+  const k = disclose(key);
+  assert(!studentKeys.member(k), "Student already enrolled");
+  assert(enrolled.read() < 1024, "Class list is full");
+  studentKeys.insert(k);
+  students.insert(k);
+  enrolled.increment(1);
+}
+
+export circuit proveGoalMet(): [] {
+  assert(issuers.member(0), "No issuer registered");
+  const sk = secretKey();
+  const me = studentKey(sk);
+
+  // 1. On the class list, without saying which entry.
+  const path = studentPath(me);
+  assert(disclose(path.leaf == me), "Path is not for this student");
+  assert(students.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(path))), "Not an enrolled student");
+
+  // 2. The counts are the platform's, for this student and this course.
+  const [periods, entries, signature] = practiceRecord();
+  const msg: Vector<4, Field> = [
+    periods as Field,
+    entries as Field,
+    studentKeyHash(me),
+    courseHash(courseId)
+  ];
+  Schnorr_schnorrVerify<4>(msg, signature, issuers.lookup(0));
+
+  // 3. The goal is met. Only the yes/no of this comparison leaves the proof.
+  assert(disclose(periods >= periodsRequired), "Practice goal not met yet");
+
+  // 4. One receipt per student per course.
+  const receipt = disclose(goalReceipt(sk, courseId, kernel.self().bytes));
+  assert(!goalMet.member(receipt), "Proof already submitted");
+  goalMet.insert(receipt);
+  proofs.increment(1);
+}
+
+// Re-exported so the off-chain signer computes exactly the circuit's challenge.
+export pure circuit schnorrChallenge(
+  ann_x: Field, ann_y: Field,
+  pk_x: Field, pk_y: Field,
+  msg: Vector<4, Field>
+): Field {
+  return Schnorr_schnorrChallenge(ann_x, ann_y, pk_x, pk_y, msg);
+}
